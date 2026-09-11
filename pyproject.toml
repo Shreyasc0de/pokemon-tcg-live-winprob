@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cabt-winprob"
+version = "0.1.0"
+description = "Live win probability for Kaggle Card Battle (cabt) Pokemon TCG episode replays"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Shreya Silwal" }]
+keywords = ["win-probability", "calibration", "state-space", "imperfect-information", "kaggle"]
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "scipy>=1.11",
+  "scikit-learn>=1.4",
+  "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+parquet = ["pyarrow>=15.0"]
+dev = ["ruff>=0.6"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["src", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "N", "ANN", "RUF"]
+ignore = [
+  "ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204",  # annotations are partial by choice
+  "E501",   # line length is handled by the formatter
+  "N803", "N806",  # X, y, C follow scikit-learn's conventions
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN", "N802"]
+"scripts/*" = ["E402"]  # sys.path shim must precede local imports

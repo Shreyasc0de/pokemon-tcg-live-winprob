@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      # The 20 committed replays make the whole pipeline runnable in CI, so a
+      # change that breaks parsing or training fails here rather than silently.
+      - name: Build the sample dataset
+        run: make sample
+
+      - name: Train on the sample
+        run: |
+          python scripts/train.py --data data/sample_processed --out /tmp/reports --no-figures
+        env:
+          PYTHONPATH: src
