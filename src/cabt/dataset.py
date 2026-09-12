@@ -1,7 +1,9 @@
 """Build the decision-point dataset from a directory of episode replays.
 
-Reduction happens file-by-file in a worker pool: 9.5 GB of JSON becomes a
-single tabular file of roughly 300k rows. Output is gzipped CSV so the
+Reduction happens file-by-file in a worker pool: 21.5 GB of JSON becomes a
+single tabular file of roughly 750k rows. Rows are flushed into columnar
+batches as they arrive so peak memory stays near 2 GB rather than scaling
+with the archive. Output is gzipped CSV so the
 pipeline has no Arrow dependency; Parquet is written instead when ``pyarrow``
 is importable and ``--parquet`` is passed.
 """
@@ -116,11 +118,22 @@ def build(
         raise FileNotFoundError(f"no *.json or *.json.gz replays under {replay_dir}")
 
     workers = workers or max(1, (os.cpu_count() or 2))
+    # Rows are flushed into DataFrames every FLUSH_ROWS rather than held as
+    # one list of dicts to the end. A dict of ~90 float keys costs several KB
+    # of interpreter overhead, so the whole archive as dicts needs multiple GB
+    # and gets OOM-killed; the same rows as float columns are a few hundred MB.
+    FLUSH_ROWS = 100_000
     rows: list[dict] = []
+    frames: list[pd.DataFrame] = []
     metas: list[dict] = []
     decks: list[dict] = []
     names: dict[int, str] = {}
     failures: list[str] = []
+
+    def _flush() -> None:
+        if rows:
+            frames.append(pd.DataFrame(rows))
+            rows.clear()
 
     with ProcessPoolExecutor(max_workers=workers) as pool:
         for path, result in zip(
@@ -135,8 +148,13 @@ def build(
             metas.append(m)
             decks.extend(d)
             names.update(n)
+            if len(rows) >= FLUSH_ROWS:
+                _flush()
+    _flush()
 
-    decisions = add_trajectory_features(pd.DataFrame(rows))
+    raw = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    frames.clear()
+    decisions = add_trajectory_features(raw)
     episodes = pd.DataFrame(metas)
     deck_df = pd.DataFrame(decks)
 

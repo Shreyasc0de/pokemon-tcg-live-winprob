@@ -65,11 +65,11 @@ def main() -> int:
 
     # Headline table: mean and spread over five episode splits.
     for name, (brier, sd, ll, auc, ece, skill) in {
-        "prize_only": (0.2167, 0.0044, 0.6209, 0.695, 0.027, 0.0),
-        "gbdt": (0.1819, 0.0044, 0.5336, 0.798, 0.022, 0.161),
-        "gbdt_filtered": (0.1815, 0.0044, 0.5325, 0.799, 0.019, 0.162),
-        "gbdt_isotonic": (0.1802, 0.0036, 0.5297, 0.801, 0.016, 0.169),
-        "gbdt_isotonic_filtered": (0.1802, 0.0036, 0.5295, 0.801, 0.018, 0.169),
+        "prize_only": (0.2118, 0.0043, 0.6098, 0.711, 0.022, 0.0),
+        "gbdt": (0.1752, 0.0050, 0.5158, 0.812, 0.011, 0.173),
+        "gbdt_filtered": (0.1750, 0.0050, 0.5155, 0.812, 0.012, 0.174),
+        "gbdt_isotonic": (0.1750, 0.0049, 0.5149, 0.812, 0.011, 0.174),
+        "gbdt_isotonic_filtered": (0.1750, 0.0049, 0.5151, 0.812, 0.013, 0.174),
     }.items():
         r = rs.loc[name]
         chk(f"{name} brier", r.brier_mean, brier)
@@ -81,15 +81,18 @@ def main() -> int:
 
     # Martingale slopes across the same splits.
     for name, (slope, sd) in {
-        "gbdt": (-0.0157, 0.0014),
-        "gbdt_filtered": (0.0008, 0.0004),
-        "gbdt_isotonic": (-0.0093, 0.0013),
-        "gbdt_isotonic_filtered": (0.0043, 0.0006),
+        "gbdt": (-0.0126, 0.0013),
+        "gbdt_filtered": (0.0028, 0.0005),
+        "gbdt_isotonic": (-0.0087, 0.0011),
+        "gbdt_isotonic_filtered": (0.0046, 0.0004),
     }.items():
         chk(f"{name} martingale slope", rs.loc[name, "martingale_slope_mean"], slope)
         chk(f"{name} martingale sd", rs.loc[name, "martingale_slope_sd"], sd)
-    chk("filtered martingale p min", rs.loc["gbdt_filtered", "martingale_p_min"], 0.02)
-    chk("filtered martingale p max", rs.loc["gbdt_filtered", "martingale_p_max"], 0.67)
+    # The filtered path's residual slope is now detectable on every split: the
+    # test gained power with n, the forecast did not get worse. README quotes
+    # the range, so check the order of magnitude at both ends.
+    chk("filtered martingale p min", rs.loc["gbdt_filtered", "martingale_p_min"], 6e-17, 1e-17)
+    chk("filtered martingale p max", rs.loc["gbdt_filtered", "martingale_p_max"], 3e-07, 1e-07)
 
     # The paired comparison the calibration claim rests on.
     brier = lg.pivot(index="split", columns="model", values="brier")
@@ -97,62 +100,64 @@ def main() -> int:
     mart_p = lg.pivot(index="split", columns="model", values="martingale_p")
     d_brier = brier["gbdt_isotonic"] - brier["gbdt"]
     d_ece = ece["gbdt_isotonic"] - ece["gbdt"]
-    for i, v in enumerate([-0.00022, -0.00067, -0.00238, -0.00275, -0.00269]):
+    for i, v in enumerate([0.00011, -0.00013, -0.00068, -0.00010, -0.00034]):
         chk(f"paired dBrier split {i}", d_brier.iloc[i], v)
-    for i, v in enumerate([-0.0024, -0.0042, -0.0013, -0.0113, -0.0102]):
+    for i, v in enumerate([0.0003, 0.0036, -0.0035, 0.0013, -0.0016]):
         chk(f"paired dECE split {i}", d_ece.iloc[i], v)
-    chk("isotonic wins Brier on 5 of 5", int((d_brier < 0).sum()), 5, 0)
-    chk("isotonic wins ECE on 5 of 5", int((d_ece < 0).sum()), 5, 0)
-    chk("raw+filter not significant in 4 of 5", int((mart_p["gbdt_filtered"] >= 0.05).sum()), 4, 0)
+    chk("isotonic wins Brier on 4 of 5", int((d_brier < 0).sum()), 4, 0)
+    chk("isotonic wins ECE on 2 of 5", int((d_ece < 0).sum()), 2, 0)
+    chk("mean dECE is ~zero", float(d_ece.mean()), 0.000005, 5e-06)
+    chk("raw+filter significant in 5 of 5", int((mart_p["gbdt_filtered"] < 0.05).sum()), 5, 0)
     chk("shipped significant in 5 of 5", int((mart_p["gbdt_isotonic_filtered"] < 0.05).sum()), 5, 0)
 
     # Ablation and grouped importance.
-    for i, v in enumerate([0.1827, 0.1811, 0.1811, 0.1798]):
+    for i, v in enumerate([0.1778, 0.1762, 0.1766, 0.1758]):
         chk(f"ablation row {i}", ab.iloc[i].brier, v)
     for fam, v in {
-        "prizes": 0.0423,
-        "hit_points": 0.0330,
-        "energy_and_evolution": 0.0180,
-        "card_economy": 0.0174,
+        "prizes": 0.0447,
+        "hit_points": 0.0265,
+        "energy_and_evolution": 0.0167,
+        "card_economy": 0.0144,
     }.items():
         chk(f"importance {fam}", imp.loc[fam, "brier_increase"], v)
     chk("importance status_conditions", imp.loc["status_conditions", "brier_increase"], 0.000)
 
     # Phase dependence, the baseline lookup, and the unseen-agent check.
-    chk("turn 0-2 brier", bt.iloc[0].brier, 0.239)
-    chk("turn 0-2 auc", bt.iloc[0].auc, 0.620)
+    chk("turn 0-2 brier", bt.iloc[0].brier, 0.245)
+    chk("turn 0-2 auc", bt.iloc[0].auc, 0.561)
     chk("lookup 2 behind", lk.loc[-2, "win_rate"], 0.27)
-    chk("lookup 2 ahead", lk.loc[2, "win_rate"], 0.85)
+    chk("lookup 2 ahead", lk.loc[2, "win_rate"], 0.86)
     u = res["unseen_agent"]
-    chk("unseen brier", u["brier"], 0.1433)
-    chk("unseen auc", u["auc"], 0.880)
-    chk("unseen episodes", u["n_test_episodes"], 99, 0)
+    chk("unseen brier", u["brier"], 0.1833)
+    chk("unseen skill", u["brier_skill_vs_ref"], 0.129)
+    chk("unseen episodes", u["n_test_episodes"], 237, 0)
 
     # Archive descriptives.
     fpa = des["first_player_advantage"]
-    chk("first-player wins", fpa["first_player_wins"], 1067, 0)
-    chk("first-player games", fpa["n_games"], 2000, 0)
-    chk("first-player rate", fpa["win_rate"], 0.534)
-    chk("first-player ci lo", fpa["ci_lo"], 0.512)
-    chk("first-player ci hi", fpa["ci_hi"], 0.555)
-    chk("first-player p", fpa["p_value_vs_half"], 0.0029)
-    chk("episodes", des["n_episodes"], 2000, 0)
-    chk("decision points", des["n_decision_points"], 332814, 0)
-    chk("agents", des["n_agents"], 151, 0)
-    chk("cards", des["n_distinct_cards"], 179, 0)
-    chk("median decision points", des["median_decision_points_per_game"], 167, 0)
-    chk("test episodes", res["n_test_episodes"], 400, 0)
+    chk("first-player wins", fpa["first_player_wins"], 2424, 0)
+    chk("first-player games", fpa["n_games"], 4516, 0)
+    chk("first-player rate", fpa["win_rate"], 0.537)
+    chk("first-player ci lo", fpa["ci_lo"], 0.522)
+    chk("first-player ci hi", fpa["ci_hi"], 0.551)
+    chk("first-player p", fpa["p_value_vs_half"], 8.3e-07, 1e-07)
+    chk("episodes", des["n_episodes"], 4518, 0)
+    chk("decision points", des["n_decision_points"], 751012, 0)
+    chk("agents", des["n_agents"], 183, 0)
+    chk("cards", des["n_distinct_cards"], 187, 0)
+    chk("median decision points", des["median_decision_points_per_game"], 166, 0)
+    chk("test episodes", res["n_test_episodes"], 903, 0)
     for route, v in {
-        "prizes_taken": 0.868,
-        "no_pokemon_left": 0.055,
-        "deck_out": 0.024,
-        "unclear": 0.054,
+        "prizes_taken": 0.878,
+        "no_pokemon_left": 0.052,
+        "deck_out": 0.019,
+        "unclear": 0.050,
     }.items():
         chk(f"win route {route}", wr.loc[route, "share"], v)
-    chk("top card decks", cards.iloc[0].decks, 455, 0)
-    chk("top card win rate", cards.iloc[0].win_rate, 0.613)
+    same = cards[cards.decks == 74]
+    chk("archetype trio decks", len(same) >= 3, True, 0)
+    chk("archetype trio win rate", same.iloc[0].win_rate, 0.622)
     chk("median turns", glen.loc["50%", "max_turn"], 12, 0)
-    chk("median steps", glen.loc["50%", "n_steps"], 172, 0)
+    chk("median steps", glen.loc["50%", "n_steps"], 171, 0)
     chk("longest game steps", glen.loc["max", "n_steps"], 1085, 0)
 
     if chk.failures:
