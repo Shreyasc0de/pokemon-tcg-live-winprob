@@ -57,8 +57,8 @@ def main() -> int:
 
     plot.calibration(
         {
-            "uncalibrated": pd.read_csv(tables / "reliability_gbdt_uncalibrated.csv"),
-            "isotonic-calibrated": pd.read_csv(tables / "reliability_gbdt_filtered.csv"),
+            "shipped model (uncalibrated)": pd.read_csv(tables / "reliability_gbdt_filtered.csv"),
+            "isotonic-recalibrated": pd.read_csv(tables / "reliability_gbdt_isotonic.csv"),
         },
         figures / "calibration.png",
     )

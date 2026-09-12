@@ -57,17 +57,22 @@ def fit_and_score(
     models["base_rate"] = BaseRateClassifier().fit(X_train, y_train)
     models["prize_only"] = linear_pipeline().fit(X_train[prize_cols], y_train)
     models["logistic"] = linear_pipeline(C=0.5).fit(X_train, y_train)
-    models["gbdt"] = calibrated(gbdt(), cv=_group_folds(train)).fit(X_train, y_train)
+    # Uncalibrated is the shipped model. On the full archive the boosted model
+    # is already well calibrated (ECE ~0.011) and isotonic recalibration makes
+    # it worse; `calibration_variants` records the comparison.
+    models["gbdt"] = gbdt().fit(X_train, y_train)
+    models["gbdt_isotonic"] = calibrated(gbdt(), cv=_group_folds(train)).fit(X_train, y_train)
 
     preds = pd.DataFrame(index=test.index)
     preds["base_rate"] = models["base_rate"].predict_proba(X_test)[:, 1]
     preds["prize_only"] = models["prize_only"].predict_proba(X_test[prize_cols])[:, 1]
     preds["logistic"] = models["logistic"].predict_proba(X_test)[:, 1]
     preds["gbdt"] = models["gbdt"].predict_proba(X_test)[:, 1]
+    preds["gbdt_isotonic"] = models["gbdt_isotonic"].predict_proba(X_test)[:, 1]
 
     # Filter tuning uses a validation split, with the per-state model refit on
     # the remaining training episodes so its validation output is out-of-sample.
-    inner = calibrated(gbdt(), cv=_group_folds(fit_part)).fit(X_fit, y_fit)
+    inner = gbdt().fit(X_fit, y_fit)
     val = val_part.assign(p_raw=inner.predict_proba(X_val)[:, 1])
     kf = LogitKalmanFilter().fit(val, "p_raw")
 
@@ -86,8 +91,7 @@ def fit_and_score(
     rel_filt = reliability(y_test, preds["gbdt_filtered"].to_numpy(), 10)
     # The uncalibrated model is kept purely so the calibration figure has
     # something to compare against: isotonic is what fixes it.
-    uncal = gbdt().fit(X_train, y_train)
-    rel_uncal = reliability(y_test, uncal.predict_proba(X_test)[:, 1], 10)
+    rel_uncal = reliability(y_test, preds["gbdt_isotonic"].to_numpy(), 10)
 
     vol = pd.DataFrame(
         {
@@ -120,7 +124,7 @@ def fit_and_score(
     for name, table in {
         "metrics": metrics_df,
         "metrics_by_turn": by_turn,
-        "reliability_gbdt_uncalibrated": rel_uncal,
+        "reliability_gbdt_isotonic": rel_uncal,
         "reliability_gbdt": rel_raw,
         "reliability_gbdt_filtered": rel_filt,
         "path_volatility": vol,
