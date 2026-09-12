@@ -13,148 +13,156 @@ is masked, their prize cards are face down); and the forecast has to stay
 coherent over time, not just accurate on average. The interesting question is
 not "who wins" but **"is the number honest at every point along the way."**
 
-Built from 1,970 episode replays (8.8 GB of JSON) reduced to **328,063 decision
-points** across 151 agents.
+Built from the complete archive: 2,000 episode replays, 8.9 GB of JSON, reduced
+to **332,814 decision points** across 151 agents.
 
 ---
 
 ## Headline results
 
-Held out **394 complete games** (65,302 decision points) from the 1,576 games
-used for training; games are split whole, never by row. Every score is quoted
-against `prize_only` — logistic regression on the prize differential alone,
-which is the number a human player already tracks in their head, and a much
-harder baseline than the base rate.
+Every score below is the **mean over five independent episode-level splits**,
+each holding out 400 whole games, with the standard deviation across splits.
+Scores are quoted against `prize_only`, logistic regression on the prize
+differential alone, which is the number a human player already tracks in their
+head and a much harder baseline than the base rate.
 
 | Model | Brier ↓ | Log loss ↓ | AUC ↑ | ECE ↓ | Brier skill vs. prize-only |
 |---|---|---|---|---|---|
-| base rate (52.4%) | 0.2494 | 0.6920 | 0.500 | 0.001 | −16.5% |
-| **prize differential only** | 0.2142 | 0.6151 | 0.703 | 0.019 | — |
-| logistic regression, 93 features | 0.1998 | 0.5791 | 0.753 | 0.011 | +6.7% |
-| gradient boosting | 0.1752 | 0.5153 | 0.813 | 0.010 | +18.2% |
-| … + isotonic recalibration | 0.1756 | 0.5183 | 0.814 | 0.025 | +18.0% |
-| **… + causal Kalman filter** *(shipped)* | **0.1747** | **0.5141** | **0.814** | **0.009** | **+18.4%** |
+| **prize differential only** | 0.2167 ± 0.0044 | 0.6209 | 0.695 | 0.027 | n/a |
+| gradient boosting | 0.1819 ± 0.0044 | 0.5336 | 0.798 | 0.022 | +16.1% ± 1.8 |
+| … + causal Kalman filter | 0.1815 ± 0.0044 | 0.5325 | 0.799 | 0.019 | +16.2% ± 1.8 |
+| … + isotonic recalibration | 0.1802 ± 0.0036 | 0.5297 | 0.801 | 0.016 | +16.9% ± 1.4 |
+| **… + isotonic + filter** *(shipped)* | **0.1802 ± 0.0036** | **0.5295** | **0.801** | 0.018 | **+16.9% ± 1.4** |
 
-Three findings, in descending order of how much they surprised me.
+Reporting five splits rather than one is not ceremony. It is the single most
+important methodological decision in the repo, and I arrived at it the hard way.
 
-### 1. The filter's real job is coherence, not accuracy
+### 1. Every model difference here is smaller than the split-to-split noise
 
-The natural next step after a per-state model is to smooth its output, and the
-natural way to sell that is "smoothing improves log loss." It barely does —
-0.5153 to 0.5141. Against an honest pass-through control, the filter's effect
-on the scoring rules is close to nil:
+Holding out 400 of 2,000 games leaves a standard deviation of **±0.0044 Brier**
+between splits. All the differences worth arguing about, calibrated versus not
+and filtered versus not, are 0.001 to 0.002. On a single split they are noise.
 
-| Smoothing | Brier | Log loss | ECE | Mean step | Martingale slope | *p* |
-|---|---|---|---|---|---|---|
-| pass-through | 0.1752 | 0.5153 | 0.0095 | 0.0389 | **−0.0183** | ~0 |
-| **tuned (q = 0.75)** | 0.1747 | 0.5141 | 0.0089 | **0.0245** | **+0.0017** | 0.008 |
-| moderate (q = 0.5) | 0.1747 | 0.5142 | 0.0099 | 0.0226 | +0.0038 | ~0 |
-| heavy (q = 0.05) | 0.1760 | 0.5182 | 0.0211 | 0.0140 | +0.0113 | ~0 |
+I learned this by watching my own conclusions flip. An earlier version of this
+project ran on a 549-game subsample and reported that isotonic recalibration
+halved calibration error. Rerunning on 1,970 games reversed it: isotonic now
+appeared to *double* ECE, and I rewrote the README to say recalibration was
+harmful. Adding the last 30 games reversed it a third time. Three different
+answers from three defensible runs, none of them wrong arithmetic. The split was
+simply doing the talking.
 
-What it does buy is a **37% reduction in path jitter** and a near-elimination of
-a martingale violation. A correctly specified probability path must satisfy
-E[p<sub>t+1</sub> − p<sub>t</sub> | p<sub>t</sub>] = 0: knowing the current level
+The fix is the paired comparison. Run the same five splits for both variants and
+subtract:
+
+| Split | Δ Brier (isotonic − raw) | Δ ECE (isotonic − raw) |
+|---|---|---|
+| 0 | −0.00022 | −0.0024 |
+| 1 | −0.00067 | −0.0042 |
+| 2 | −0.00238 | −0.0013 |
+| 3 | −0.00275 | −0.0113 |
+| 4 | −0.00269 | −0.0102 |
+
+Isotonic wins **5 of 5 on both metrics**. The effect is real, it is just small
+enough that a single split cannot see it. That is the finding, and it is worth
+more than the number it produces.
+
+### 2. The filter buys path coherence, and the shipped model pays for it
+
+A correctly specified probability path must be a martingale:
+E[p<sub>t+1</sub> − p<sub>t</sub> | p<sub>t</sub>] = 0. Knowing the current level
 should tell you nothing about which way it moves next. Regressing the next step
-on the current level, the raw per-state model has a firmly **negative** slope —
-it overshoots and gets pulled back, the signature of a memoryless model reacting
-to every twitch of the board. Over-smooth it instead and the slope goes
-**positive**, because a laggy path keeps drifting the direction it was already
-going. The tuned filter sits just past the zero crossing, cutting the violation
-by about 90% and flipping its sign.
+on the current level, across the same five splits:
 
-It does not *remove* the violation. At 64,514 test transitions a slope of
-+0.0017 is still significant (*p* = 0.008), and the same is true of every
-setting in the sweep. The honest summary is that the filter buys most of the
-coherence back, not all of it.
+| Model | Martingale slope | *p* across the 5 splits |
+|---|---|---|
+| gradient boosting | −0.0157 ± 0.0014 | ~0 in all five |
+| **gbdt + filter** | **+0.0008 ± 0.0004** | **0.02 to 0.67, not significant in four of five** |
+| gbdt + isotonic | −0.0093 ± 0.0013 | ~0 in all five |
+| gbdt + isotonic + filter *(shipped)* | +0.0043 ± 0.0006 | ~0 in all five |
+
+The raw per-state model has a firmly negative slope: it overshoots and gets
+pulled back, the signature of a memoryless model reacting to every twitch of the
+board. The filter removes essentially all of that. Over-smooth instead and the
+slope goes positive, because a laggy path keeps drifting the way it was already
+going.
+
+**The honest cost:** isotonic recalibration already shrinks predictions toward
+the middle, so stacking the filter on top overshoots past zero to +0.0043, which
+is detectable on every split. The shipped model is therefore the better forecast
+and *not* the more coherent path. The uncalibrated `gbdt + filter` is the only
+configuration in the sweep that is martingale-clean, at a cost of about 0.0013
+Brier and 0.003 ECE. Both are in `reports/tables/repeated_splits.csv`; I ship the
+one that wins the proper scoring rules and state what it gives up rather than
+quietly picking whichever supports the nicer sentence.
 
 ![Raw, tuned and over-smoothed paths over a 70-decision window](reports/figures/filter_zoom.png)
 
-*(An earlier version of this repo, built on a 549-game subsample, reported that
-the tuned filter restored the martingale property outright and that the test
-independently selected the same `q` chosen by log loss. At four times the data
-that result does not survive — the effect was real but the "passes the test"
-part was low statistical power. The sweep above is what the full archive says.)*
-
-### 2. Recalibration helps at small sample sizes and hurts at large ones
-
-AUC 0.81 sounds respectable and is nearly irrelevant. A win-probability curve is
-only worth showing if 70% means 70%. On the full archive the boosted model is
-already well calibrated straight out of the box — ECE 0.0095 — and isotonic
-recalibration makes it **worse**, roughly doubling ECE to 0.0240 and degrading
-log loss, while adding nothing to Brier.
-
-![Calibration curves for the shipped model and the isotonic-recalibrated variant](reports/figures/calibration.png)
-
-This reverses at small sample sizes, which is the interesting part. On a
-549-game subsample the uncalibrated model was visibly over-confident (ECE 0.049)
-and isotonic halved that. The recalibration step was fixing a small-sample
-pathology, not a structural one, and once there is enough data to fit the
-boosted model properly it becomes a source of noise. The shipped model is
-therefore uncalibrated, and `reports/tables/calibration_variants.csv` records
-all three options so the choice is auditable rather than asserted.
-
-Accuracy is also strongly phase-dependent. Before turn six the model barely
-beats the prize-differential baseline; the edge arrives as the board resolves.
-
-![Brier score by turn bucket](reports/figures/brier_by_turn.png)
+*(An earlier version of this README claimed the martingale test independently
+confirmed the `q` chosen by log loss. It does not. That was one split's p-value
+read as a result.)*
 
 ### 3. Prizes and hit points carry it; status conditions carry nothing
 
 Permutation importance is computed **by family**, not per feature, because the
-features inside a family are deliberately collinear — `my_prizes`, `opp_prizes`
-and `prize_diff` encode the same thing three ways, and shuffling them one at a
+features inside a family are deliberately collinear. `my_prizes`, `opp_prizes`
+and `prize_diff` encode the same thing three ways, so shuffling them one at a
 time lets the model read the twin and report near-zero importance for all three.
 
 ![Grouped permutation importance](reports/figures/feature_importance.png)
 
-The prize differential dominates (+0.0450 Brier when shuffled), board hit points
-are second (+0.0292), and card economy — hand, deck and discard sizes — is a
-real third (+0.0191). Status conditions contribute nothing measurable at all.
-The ablation is consistent and monotone: core game state 0.1772, plus the
-legal-action menu 0.1766, plus history/momentum terms 0.1761, plus the agent's
-remaining thinking-time budget 0.1752. Every group earns a little; none of them
-transforms the model.
+The prize differential dominates (+0.0423 Brier when shuffled), board hit points
+are second (+0.0330), then energy and evolution state (+0.0180) and card economy
+(+0.0174). Status conditions contribute nothing measurable at all. The ablation
+is consistent: core game state 0.1827, plus the legal-action menu 0.1811, plus
+history and momentum terms 0.1811 (**no gain at all from the trajectory
+features**), plus the thinking-time budget 0.1798. Lags and EWMAs of the state
+add nothing the per-state features do not already carry, which is the other
+reason the sequential structure is handled by the filter rather than by feature
+engineering.
+
+Accuracy is strongly phase-dependent. Before turn six the model barely beats the
+prize-differential baseline; the edge arrives as the board resolves.
+
+![Brier score by turn bucket](reports/figures/brier_by_turn.png)
 
 ---
 
 ## What I would not claim
 
-- **Card-level win rates are archetype win rates.** Decks are chosen, not
-  assigned, and the top of the table gives the game away: `Fan Rotom`, `Buneary`
-  and `Mega Lopunny ex` all show 61.3% across exactly 447 decks, because they
-  are the same deck. The table measures which lists won, not which cards cause
-  wins, and no causal claim is made.
-- **Unseen-agent performance looks better, and that is suspicious.** Holding out
-  whole *agents* rather than whole games gives Brier 0.1387 and AUC 0.889 —
-  better than the episode split, not worse. The likely explanation is that the
-  held-out agents' 95 games are an easier subpopulation (more lopsided matchups
-  resolve earlier), not that the model generalises unusually well. I would treat
-  this as "no evidence of an agent-specific overfit" and nothing stronger.
 - **The model is weakest exactly where a forecast is most interesting.** In the
-  first two turns it is barely better than a coin flip (Brier 0.239, AUC 0.583).
-  Most of the headline skill is earned after turn eight, when the board has
-  largely decided things anyway.
-- **30 of the archive's 2,000 episodes are missing** — a transfer failure, not a
-  filter. Everything here is 1,970 games; rerunning on the complete archive will
-  move the third decimal place, not the conclusions.
+  first two turns it is close to a coin flip (Brier 0.239, AUC 0.620). Most of
+  the headline skill is earned after turn eight, once the board has largely
+  decided things anyway.
+- **Card-level win rates are archetype win rates.** Decks are chosen, not
+  assigned, and the top of the table gives it away: `Fan Rotom`, `Buneary` and
+  `Mega Lopunny ex` all show 61.3% across exactly 455 decks, because they are the
+  same deck. The table measures which lists won, not which cards cause wins.
+- **Unseen-agent performance looks better, and that is suspicious.** Holding out
+  whole *agents* rather than whole games gives Brier 0.1433 and AUC 0.880,
+  better than the episode split rather than worse. The likely explanation is that those
+  99 games are an easier subpopulation, not that the model generalises unusually
+  well. Read it as "no evidence of an agent-specific overfit" and nothing more.
+- **Isotonic's margin is small.** 5 of 5 paired splits is a sign test at
+  *p* = 0.031. It is evidence, not proof, and five splits of 400 games are not
+  independent of each other in the strict sense, since they resample the same
+  2,000 games.
 
-## What the full archive settled
+## What scaling the data settled
 
-Running the whole archive rather than a subsample changed real conclusions, so
-it is worth recording which ones. **First-player advantage is now established**:
-the player moving first won 1,049 of 1,970 games, 53.2% (95% CI 51.0–55.4%,
-*p* = 0.0042). On 549 games the same estimate was 53.9% with *p* = 0.073 — the
-right answer, but not yet demonstrable. The martingale and calibration findings
-above moved in the other direction. Both are the reason the pipeline is built to
-run the full 8.8 GB in one command rather than to be convincing on a sample.
+Running the complete archive rather than a subsample changed real conclusions.
+**First-player advantage is now established**: the player moving first won 1,067
+of 2,000 games, 53.4% (95% CI 51.2–55.5%, *p* = 0.0029). On 549 games the same
+estimate was 53.9% with *p* = 0.073, the right answer but not yet demonstrable.
+The calibration and martingale findings moved the other way, which is why the
+repeated-split harness exists at all.
 
 ---
 
 ## How it works
 
 **Decision points, not turns.** A row is emitted wherever a player is `ACTIVE`
-and holds a non-empty legal-action menu — exactly the moment a player would want
-a number. Both seats contribute rows, always from the acting player's own point
+and holds a non-empty legal-action menu, which is exactly the moment a player
+would want a number. Both seats contribute rows, always from the acting player's own point
 of view, so `my_*` means the actor and `opp_*` their opponent and the label is
 "did the actor go on to win". That doubles the data and makes seat bias
 impossible to learn by accident: which seat you are is exposed explicitly as
@@ -165,9 +173,9 @@ and asserting every differential is exactly negated.
 **Imperfect information is preserved, not repaired.** The replays mask the
 opponent's hand (`null`, with only a count) and keep prize cards face down, and
 the features respect that. During setup the opponent's active Pokémon is face
-down too; rather than encode "unknown HP" as zero HP, those slots become `NaN`
-— read natively by the boosted model, median-imputed in-pipeline for the linear
-baselines — alongside an explicit `opp_hidden_pokemon` count. Each episode also
+down too. Rather than encode "unknown HP" as zero HP, those slots become `NaN`,
+read natively by the boosted model and median-imputed in-pipeline for the linear
+baselines, alongside an explicit `opp_hidden_pokemon` count. Each episode also
 carries a fully-revealed `visualize` payload with both decklists; it is used for
 card names and the descriptive metagame tables and **never** reaches the feature
 matrix.
@@ -177,10 +185,10 @@ matrix.
 The first is the clock. An episode terminates the instant somebody wins, so
 `step_index` and `n_steps` are direct functions of the outcome. Both are carried
 for bookkeeping and excluded from the feature set, with a test asserting it.
-`turn` stays in — that is a legitimate in-game observable.
+`turn` stays in, because that is a legitimate in-game observable.
 
 The second is the setup phase. The two prize piles are dealt a moment apart, so
-a seat's first few observations can read "opponent 6 prizes, me 0" — which the
+a seat's first few observations can read "opponent 6 prizes, me 0", which the
 prize-differential feature would take for a nearly-won game rather than an
 un-dealt board. The parser drops decisions until a seat has seen both piles at
 full size.
@@ -188,9 +196,9 @@ full size.
 **Splits respect game boundaries everywhere.** Rows within a game are strongly
 dependent and the two seats of a game share an outcome, so a random row split
 would put near-duplicates of a test state in training and flatter every metric.
-Episodes are held out whole; the calibration comparison's cross-fitting folds
-are `GroupKFold` on episode id; the filter's `q` is tuned on a further disjoint
-slice of *training* episodes, never on the test set.
+Episodes are held out whole; the isotonic calibrator's cross-fitting folds are
+`GroupKFold` on episode id; the filter's `q` is tuned on a further disjoint slice
+of *training* episodes, never on the test set.
 
 **The filter.** A local-level state-space model on the win-probability logit, one
 chain per (episode, seat):
@@ -198,8 +206,8 @@ chain per (episode, seat):
 x<sub>t</sub> = x<sub>t−1</sub> + w<sub>t</sub>, w ~ N(0, q) &nbsp;&nbsp;·&nbsp;&nbsp;
 z<sub>t</sub> = x<sub>t</sub> + v<sub>t</sub>, v ~ N(0, r)
 
-where z is the per-state model's output. Only the **forward** pass runs — no
-smoothing pass — so the estimate at decision point *t* depends on nothing after
+where z is the per-state model's output. Only the **forward** pass runs, with no
+smoothing pass, so the estimate at decision point *t* depends on nothing after
 *t* and remains a legitimate real-time number. Tests assert the causality
 directly (perturbing a later observation leaves earlier outputs bit-identical)
 and that chains never bleed into each other.
@@ -209,26 +217,26 @@ and that chains never bleed into each other.
 ![Empirical win rate by prize differential](reports/figures/prize_lookup.png)
 
 Two prizes up is worth 85%; two down is 27%. Any model that cannot beat this
-lookup table is not earning its complexity. The full-feature model's +18% Brier
+lookup table is not earning its complexity. The full-feature model's ~17% Brier
 skill over it is the headline claim of the project, and it is a modest, real
 number rather than an impressive, leaky one.
 
 ### What the archive looks like
 
-1,970 games, 151 distinct agents, 179 distinct cards, a median of 12 turns and
+2,000 games, 151 distinct agents, 179 distinct cards, a median of 12 turns and
 167 decision points per game, no draws, and no non-`DONE` statuses. Games end by
 prizes in 86.8% of cases; 5.5% end with the loser having no Pokémon left to
-promote and 2.3% by running out of deck (5.4% stay unclassified, because the
-final observation is one play stale). Game length has a long tail — the median
-is 172 replay steps, the longest game runs 1,085.
+promote and 2.4% by running out of deck (5.4% stay unclassified, because the
+final observation is one play stale). Game length has a long tail: the median is
+172 replay steps, and the longest game runs 1,085.
 
 ---
 
 ## Reproducing
 
 Requires Python 3.11+ and the packages in `requirements.txt` (numpy, pandas,
-scipy, scikit-learn, matplotlib — no Arrow or GPU dependency; `pyarrow` is
-optional and only enables `--parquet`).
+scipy, scikit-learn, matplotlib). There is no Arrow or GPU dependency; `pyarrow`
+is optional and only enables `--parquet`.
 
 ```bash
 pip install -r requirements.txt
@@ -238,18 +246,21 @@ make sample
 python scripts/train.py --data data/sample_processed --out /tmp/reports
 
 # 2. Or against the real archive: download the Kaggle dataset, unzip, then
-make dataset REPLAYS=~/Downloads/archive   # ~2.5 min for 2,000 episodes
-make train                                 # ~10 min for 328k decision points
+make dataset REPLAYS=~/Downloads/archive   # ~3 min for 2,000 episodes
+make train                                 # ~20 min (five splits + ablation + sweep)
 make analyse
 
 make test                                  # 49 tests, ~5s, no network needed
+make verify                                # re-derive all 91 README figures from reports/
 ```
 
-`make dataset` reduces 8.8 GB of JSON to a single 24 MB table by streaming one
+`make dataset` reduces 8.9 GB of JSON to a single 24 MB table by streaming one
 file at a time across a worker pool; the raw archive never needs to fit in
 memory and is git-ignored. Every number and figure in this README is written to
 `reports/` by `make train` and `make analyse`, and committed, so the results are
-checkable without running anything.
+checkable without running anything. `make verify` re-derives all 91 figures
+quoted in this README from those tables and fails on any drift. It runs in CI, so
+a retrain that moves a number cannot silently leave the prose behind.
 
 ## Repository layout
 
@@ -262,9 +273,10 @@ src/cabt/
   models.py     baselines, calibration wrapper, the causal logit Kalman filter
   evaluate.py   proper scoring rules, reliability, path volatility, martingale test
   analysis.py   descriptive tables with Wilson intervals; online Elo
-  pipeline.py   the experiment: ladder, ablation, filter sweep, unseen-agent check
+  pipeline.py   the experiment: ladder, repeated splits, ablation, filter sweep,
+                calibration variants, unseen-agent check
   plot.py       figures
-scripts/        build_dataset.py · train.py · analyse.py
+scripts/        build_dataset.py · train.py · analyse.py · verify_readme.py
 tests/          49 tests: parser invariants, leakage, perspective symmetry,
                 filter causality, metric correctness on known cases
 data/sample/    20 gzipped replays (1.3 MB) so CI runs the real pipeline
@@ -272,10 +284,14 @@ docs/           reverse-engineered notes on the replay format
 reports/        generated metrics, tables and figures (committed)
 ```
 
+The tables worth opening first are `reports/tables/repeated_splits.csv` (the
+headline numbers, with their spread) and `repeated_splits_long.csv` (per-split,
+for the paired comparisons above).
+
 ## Data
 
-[Kaggle Card Battle (`cabt`) episode replays](https://www.kaggle.com/) — 2,000
-JSON episode files, 9.5 GB unzipped. The format is undocumented; the structural
+[Kaggle Card Battle (`cabt`) episode replays](https://www.kaggle.com/): 2,000
+JSON episode files, 8.9 GB unzipped. The format is undocumented; the structural
 notes, enum codes and gotchas in [`docs/data-schema.md`](docs/data-schema.md) are
 reverse-engineered from the files and asserted by the test suite.
 

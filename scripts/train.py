@@ -53,12 +53,13 @@ def main() -> int:
         figures / "filter_zoom.png",
         window=(0, 70),
         tuned_q=float(summary["kalman_q"]),
+        raw_col="p_gbdt_isotonic",
     )
 
     plot.calibration(
         {
-            "shipped model (uncalibrated)": pd.read_csv(tables / "reliability_gbdt_filtered.csv"),
-            "isotonic-recalibrated": pd.read_csv(tables / "reliability_gbdt_isotonic.csv"),
+            "uncalibrated": pd.read_csv(tables / "reliability_gbdt.csv"),
+            "shipped (isotonic + filter)": pd.read_csv(tables / "reliability_gbdt_filtered.csv"),
         },
         figures / "calibration.png",
     )

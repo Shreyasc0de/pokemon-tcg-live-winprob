@@ -6,6 +6,7 @@
 #   make analyse    descriptive tables and the prize-differential figure
 #   make all        dataset + train + analyse
 #   make test       run the test suite
+#   make verify     check every number in README.md against reports/
 #
 # Point REPLAYS at the unzipped Kaggle archive:
 #   make dataset REPLAYS=~/Downloads/archive
@@ -16,10 +17,10 @@ OUT     ?= reports
 PY      ?= python3
 export PYTHONPATH := src
 
-.PHONY: all sample dataset train analyse test lint clean help
+.PHONY: all sample dataset train analyse test verify lint clean help
 
 help:
-	@sed -n '2,14p' Makefile | sed 's/^# \{0,1\}//'
+	@sed -n '2,15p' Makefile | sed 's/^# \{0,1\}//'
 
 sample:
 	$(PY) scripts/build_dataset.py --replays data/sample --out data/sample_processed
@@ -37,6 +38,9 @@ all: dataset train analyse
 
 test:
 	$(PY) -m unittest discover -s tests -v
+
+verify:
+	$(PY) scripts/verify_readme.py
 
 lint:
 	@command -v ruff >/dev/null 2>&1 && ruff check src scripts tests || echo "ruff not installed; skipping"

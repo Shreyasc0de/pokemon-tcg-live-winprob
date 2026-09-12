@@ -1,15 +1,15 @@
 {
-  "n_episodes": 1970,
-  "n_decision_points": 328063,
+  "n_episodes": 2000,
+  "n_decision_points": 332814,
   "n_agents": 151,
   "n_distinct_cards": 179,
   "first_player_advantage": {
-    "n_games": 1970,
-    "first_player_wins": 1049,
-    "win_rate": 0.5324873096446701,
-    "ci_lo": 0.5104124083024015,
-    "ci_hi": 0.5544357537790947,
-    "p_value_vs_half": 0.0042068646294258945,
+    "n_games": 2000,
+    "first_player_wins": 1067,
+    "win_rate": 0.5335,
+    "ci_lo": 0.5115924242638314,
+    "ci_hi": 0.5552791288569341,
+    "p_value_vs_half": 0.0029304204914863126,
     "seat_0_is_always_first": false
   },
   "median_turns": 12.0,

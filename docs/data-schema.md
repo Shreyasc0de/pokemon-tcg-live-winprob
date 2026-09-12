@@ -58,7 +58,7 @@ One JSON file per episode, named `<EpisodeId>.json`, averaging 4.75 MB. Roughly
 `action` is a list of indices into the *previous* step's `select.option`, so an
 action and the menu it answers live in different steps.
 
-## `observation.current` — one seat's view
+## `observation.current`: one seat's view
 
 ```
 {
@@ -105,7 +105,7 @@ makes it usable for modelling:
 | active / bench | full | full, except face-down setup entries (`null`) |
 | discard | full | full |
 
-`prize` is always a list of `null` — face-down by definition — so only its
+`prize` is always a list of `null`, face-down by definition, so only its
 length is information. Observed lengths bottom out at 1, never 0: a seat's final
 observation precedes the terminal play, so the prize take that ends the game is
 never reflected in a subsequent state.
@@ -124,7 +124,7 @@ never reflected in a subsequent state.
 }
 ```
 
-## `observation.select` — the legal-action menu
+## `observation.select`: the legal-action menu
 
 ```
 {
@@ -142,7 +142,7 @@ Option payload keys vary by option type: `index`, `area`, `playerIndex`,
 `cardId`/`serial`, `toolIndex`. Enum codes for log, select and option types are
 catalogued in [`src/cabt/schema.py`](../src/cabt/schema.py).
 
-## `visualize` — ground truth, deliberately unused
+## `visualize`: ground truth, deliberately unused
 
 Step 0 carries a `visualize` payload with the fully revealed state, including
 both 60-card decklists as flat card-id arrays in `visualize[0]["action"]` and
@@ -157,7 +157,7 @@ see it.
    so the two seats of the same step can disagree by one.
 2. **Setup rows are junk for modelling.** The two prize piles are dealt at
    slightly different moments, so a seat's first observations can read
-   "opponent 6, me 0" — a prize differential feature would take that for a
+   "opponent 6, me 0", and a prize differential feature would take that for a
    nearly won game. The parser drops decisions until a seat has seen both piles
    at full size.
 3. **The step index leaks the outcome.** An episode ends the instant somebody

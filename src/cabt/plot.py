@@ -123,7 +123,7 @@ def winprob_curves(
 
         winner_seat = 0 if game["label"].iloc[0] == (game["acting_player"].iloc[0] == 0) else 1
         won = "seat 0 won" if winner_seat == 0 else "seat 1 won"
-        ax.set_title(f"Episode {eid} — {won}", color=INK)
+        ax.set_title(f"Episode {eid}: {won}", color=INK)
         ax.set_ylim(0, 1)
         ax.set_xlim(0, max(1, len(game) - 1))
         ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])

@@ -30,6 +30,11 @@ jobs:
 
       # The 20 committed replays make the whole pipeline runnable in CI, so a
       # change that breaks parsing or training fails here rather than silently.
+      # The committed reports are the numbers quoted in the README; this fails
+      # if a retrain moved them and the README was not updated.
+      - name: Verify README figures against committed reports
+        run: python scripts/verify_readme.py
+
       - name: Build the sample dataset
         run: make sample
 
