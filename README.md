@@ -146,6 +146,15 @@ prize-differential baseline; the edge arrives as the board resolves.
   *p* = 0.031. It is evidence, not proof, and five splits of 400 games are not
   independent of each other in the strict sense, since they resample the same
   2,000 games.
+- **The archive is a rating-filtered sample, not a random one.** Kaggle selects
+  these replays daily "ranked by average agent rating" under a 20 GiB/day cap,
+  so every game here is drawn from the stronger tail of play. Everything
+  descriptive is conditional on that: the first-player advantage is 53.4% *among
+  highly rated agents*, the card and archetype win rates describe what strong
+  decks did, and the Elo table rates agents on a filtered subset of their games
+  rather than on all of them. A uniform sample of the population could give
+  different numbers, and there is no way to check that from inside this dataset.
+  It is also the most plausible explanation for the unseen-agent result above.
 
 ## What scaling the data settled
 
@@ -290,10 +299,22 @@ for the paired comparisons above).
 
 ## Data
 
-[Kaggle Card Battle (`cabt`) episode replays](https://www.kaggle.com/): 2,000
-JSON episode files, 8.9 GB unzipped. The format is undocumented; the structural
-notes, enum codes and gotchas in [`docs/data-schema.md`](docs/data-schema.md) are
-reverse-engineered from the files and asserted by the test suite.
+"The Pokemon Company - PTCG AI Battle Challenge Simulation Episodes", a Kaggle
+simulations-competition dataset of `cabt` episode replays, released under
+**CC0 1.0 (public domain)**. This project uses 2,000 JSON episode files, 8.9 GB
+unzipped, from a single daily release.
+
+Two things about the dataset are worth knowing before reusing any number here.
+Kaggle selects each day's replays by average agent rating under a 20 GiB cap, so
+the sample is drawn from the stronger tail of play rather than uniformly (see
+"What I would not claim"). And the dataset ships a `manifest.csv` listing every
+included episode with its score, which this pipeline does not currently read; it
+is the obvious way to quantify the selection, and to test whether forecast
+accuracy varies with agent strength.
+
+The replay format itself is undocumented. The structural notes, enum codes and
+gotchas in [`docs/data-schema.md`](docs/data-schema.md) are reverse-engineered
+from the files and asserted by the test suite.
 
 ## License
 
