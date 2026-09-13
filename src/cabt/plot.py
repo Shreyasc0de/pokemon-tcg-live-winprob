@@ -368,3 +368,29 @@ def prize_lookup(lookup: pd.DataFrame, model_curve: pd.DataFrame | None, path: s
     ax.legend(loc="upper left")
     _tidy(ax, hide_x_grid=False)
     return _save(fig, path)
+
+
+def strength_stratified(table: pd.DataFrame, path: str | Path) -> Path:
+    """Brier by agent-strength quartile: the model flat, the baseline drifting."""
+    fig, ax = plt.subplots(figsize=(7.0, 4.2))
+    x = np.arange(len(table))
+    ax.plot(x, table["brier_prize_only"], "o-", color=REFERENCE, lw=1.6, label="prize differential only")
+    ax.plot(x, table["brier_model"], "o-", color=SERIES[0], lw=2.0, label="gbdt + filter")
+    for i, row in table.reset_index(drop=True).iterrows():
+        ax.annotate(
+            f"{row['brier_skill']:.1%} skill",
+            (i, row["brier_model"]),
+            textcoords="offset points", xytext=(0, -16),
+            ha="center", fontsize=8, color=SERIES[0],
+        )
+    ax.set_xticks(x)
+    ax.set_xticklabels(
+        [f"{r.bucket}\n{r.score_lo:.0f}-{r.score_hi:.0f}" for r in table.itertuples()],
+        fontsize=8,
+    )
+    ax.set_xlabel("held-out episodes by mean agent rating (quartiles)")
+    ax.set_ylabel("Brier score (lower is better)")
+    ax.set_title("Accuracy holds across the rated band; the baseline does not")
+    ax.legend(frameon=False, fontsize=9)
+    _tidy(ax)
+    return _save(fig, path)

@@ -79,6 +79,30 @@ def main() -> int:
             )
         plot.prize_lookup(lookup, model_curve, out / "figures" / "prize_lookup.png")
         print(f"wrote {out / 'figures' / 'prize_lookup.png'}")
+
+    # Strength stratification needs both the archive manifest and held-out
+    # predictions, so it is skipped on the sample pipeline where neither the
+    # manifest nor a trained model is present.
+    manifest_path = Path("data/manifest.csv")
+    pred_path = out / "test_predictions.csv.gz"
+    if manifest_path.exists() and pred_path.exists():
+        preds = pd.read_csv(
+            pred_path,
+            usecols=["episode_id", "label", "p_prize_only", "p_gbdt_filtered"],
+        )
+        try:
+            strat, strat_summary = A.strength_stratified(preds, pd.read_csv(manifest_path))
+        except ValueError as exc:  # too few matched episodes, e.g. the sample run
+            print(f"[analyse] skipping strength stratification: {exc}")
+            return 0
+        strat.to_csv(out / "tables" / "strength_stratified.csv", index=False)
+        (out / "strength.json").write_text(
+            json.dumps(strat_summary, indent=2), encoding="utf-8"
+        )
+        print(json.dumps(strat_summary, indent=2))
+        if not args.no_figures:
+            plot.strength_stratified(strat, out / "figures" / "strength_stratified.png")
+            print(f"wrote {out / 'figures' / 'strength_stratified.png'}")
     return 0
 
 

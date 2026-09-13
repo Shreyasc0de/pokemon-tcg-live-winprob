@@ -58,8 +58,10 @@ def main() -> int:
     wr = t("descriptive_win_route").set_index("route")
     cards = t("descriptive_card_win_rates")
     glen = t("descriptive_game_length").set_index("stat")
+    strat = t("strength_stratified")
     res = json.loads((rp / "results.json").read_text())
     des = json.loads((rp / "descriptive.json").read_text())
+    stg = json.loads((rp / "strength.json").read_text())
 
     chk = Checker()
 
@@ -159,6 +161,30 @@ def main() -> int:
     chk("median turns", glen.loc["50%", "max_turn"], 12, 0)
     chk("median steps", glen.loc["50%", "n_steps"], 171, 0)
     chk("longest game steps", glen.loc["max", "n_steps"], 1085, 0)
+
+    # Finding 4: accuracy against agent rating.
+    for i, (lo, hi, bm, bp, sk) in enumerate([
+        (1053, 1075, 0.1697, 0.2006, 0.154),
+        (1075, 1100, 0.1688, 0.1987, 0.151),
+        (1100, 1138, 0.1709, 0.2037, 0.161),
+        (1138, 1277, 0.1732, 0.2200, 0.212),
+    ]):
+        r = strat.iloc[i]
+        chk(f"strat Q{i + 1} score lo", r.score_lo, lo, 0.5)
+        chk(f"strat Q{i + 1} score hi", r.score_hi, hi, 0.5)
+        chk(f"strat Q{i + 1} brier model", r.brier_model, bm)
+        chk(f"strat Q{i + 1} brier prize", r.brier_prize_only, bp)
+        chk(f"strat Q{i + 1} skill", r.brier_skill, sk)
+        chk(f"strat Q{i + 1} episodes", r.episodes, [226, 226, 225, 226][i], 0)
+    chk("strat model slope", stg["model_brier_vs_score"]["slope"], 4.3e-05, 5e-07)
+    chk("strat model stderr", stg["model_brier_vs_score"]["stderr"], 6.9e-05, 5e-07)
+    chk("strat model p", stg["model_brier_vs_score"]["p_value"], 0.53)
+    chk("strat model r2", stg["model_brier_vs_score"]["r_squared"], 0.0004)
+    chk("strat prize slope", stg["prize_only_brier_vs_score"]["slope"], 1.3e-04, 5e-06)
+    chk("strat prize p", stg["prize_only_brier_vs_score"]["p_value"], 0.044)
+    chk("strat gain p", stg["brier_gain_vs_score"]["p_value"], 0.11)
+    chk("strat span", stg["score_span"], 225, 0.5)
+    chk("strat episodes", stg["n_episodes"], 903, 0)
 
     if chk.failures:
         print(f"{len(chk.failures)} of {chk.checked} README figures do not match:\n", file=sys.stderr)

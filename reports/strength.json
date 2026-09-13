@@ -1,0 +1,25 @@
+{
+  "n_episodes": 903,
+  "score_min": 1052.676671,
+  "score_max": 1277.424474,
+  "score_span": 224.74780299999998,
+  "model_brier_vs_score": {
+    "slope": 4.2806604043819497e-05,
+    "stderr": 6.876324261267429e-05,
+    "p_value": 0.5337564562315991,
+    "r_squared": 0.0004299295612657389
+  },
+  "prize_only_brier_vs_score": {
+    "slope": 0.00012645395291483602,
+    "stderr": 6.276785627010063e-05,
+    "p_value": 0.044240205297375955,
+    "r_squared": 0.004484494181555714
+  },
+  "brier_gain_vs_score": {
+    "slope": 8.36473488710165e-05,
+    "stderr": 5.2793960686791776e-05,
+    "p_value": 0.11345105094380836,
+    "r_squared": 0.0027784509620504736
+  },
+  "model_col": "p_gbdt_filtered"
+}

@@ -213,3 +213,83 @@ def turn_state_win_rates(decisions: pd.DataFrame) -> pd.DataFrame:
     g = d.groupby("prize_diff_clipped")["label"]
     tab = _rate_table(g.sum(), g.size())
     return tab.reset_index()
+
+
+def strength_stratified(
+    preds: pd.DataFrame,
+    manifest: pd.DataFrame,
+    model_col: str = "p_gbdt_filtered",
+    ref_col: str = "p_prize_only",
+    n_buckets: int = 4,
+) -> tuple[pd.DataFrame, dict]:
+    """Does forecast accuracy depend on how strong the players are?
+
+    The archive is rating-filtered: Kaggle keeps each day's replays "ranked by
+    average agent rating" under a size cap, so this sample is the strong tail
+    of the population and nothing here observes the games that were excluded.
+    That makes the selection *effect* unmeasurable from inside the dataset.
+    What is measurable is whether accuracy varies with strength across the
+    band that did survive the filter, which is what bounds how much the
+    headline numbers could move on a differently-selected sample.
+
+    The episode is the unit: rows inside a game are dependent and share one
+    ``avg_score``, so per-row regressions would overstate their own precision
+    by a factor of roughly the decisions per game.
+    """
+    scores = manifest[["episode_id", "avg_score"]]
+    df = preds.merge(scores, on="episode_id", how="inner")
+    if df["episode_id"].nunique() < n_buckets * 2:
+        raise ValueError(
+            f"only {df['episode_id'].nunique()} episodes match the manifest; "
+            f"need at least {n_buckets * 2} to stratify into {n_buckets} buckets"
+        )
+    df = df.assign(
+        _b_model=(df[model_col] - df["label"]) ** 2,
+        _b_ref=(df[ref_col] - df["label"]) ** 2,
+    )
+    ep = df.groupby("episode_id").agg(
+        avg_score=("avg_score", "first"),
+        n_rows=("label", "size"),
+        b_model=("_b_model", "mean"),
+        b_ref=("_b_ref", "mean"),
+    )
+    ep["gain"] = ep["b_ref"] - ep["b_model"]
+
+    labels = [f"Q{i + 1}" for i in range(n_buckets)]
+    bucket = pd.qcut(ep["avg_score"], n_buckets, labels=labels)
+    table = (
+        ep.groupby(bucket, observed=True)
+        .agg(
+            episodes=("n_rows", "size"),
+            decision_points=("n_rows", "sum"),
+            score_lo=("avg_score", "min"),
+            score_hi=("avg_score", "max"),
+            brier_model=("b_model", "mean"),
+            brier_prize_only=("b_ref", "mean"),
+        )
+        .reset_index()
+        .rename(columns={"avg_score": "bucket"})
+    )
+    table["brier_skill"] = 1 - table["brier_model"] / table["brier_prize_only"]
+
+    def _fit(y: pd.Series) -> dict:
+        r = stats.linregress(ep["avg_score"], y)
+        return {
+            "slope": float(r.slope),
+            "stderr": float(r.stderr),
+            "p_value": float(r.pvalue),
+            "r_squared": float(r.rvalue**2),
+        }
+
+    span = float(ep["avg_score"].max() - ep["avg_score"].min())
+    summary = {
+        "n_episodes": len(ep),
+        "score_min": float(ep["avg_score"].min()),
+        "score_max": float(ep["avg_score"].max()),
+        "score_span": span,
+        "model_brier_vs_score": _fit(ep["b_model"]),
+        "prize_only_brier_vs_score": _fit(ep["b_ref"]),
+        "brier_gain_vs_score": _fit(ep["gain"]),
+        "model_col": model_col,
+    }
+    return table, summary

@@ -159,6 +159,45 @@ prize-differential baseline; the edge arrives as the board resolves.
 
 ![Brier score by turn bucket](reports/figures/brier_by_turn.png)
 
+### 4. Accuracy is flat across the rated band; the baseline is not
+
+The archive is rating-filtered, so the obvious worry is that these numbers only
+hold for strong play. The dataset's own `manifest.csv` carries an `avg_score`
+per episode, which makes part of that checkable. Splitting the 903 held-out
+games into rating quartiles:
+
+| Quartile | Mean agent rating | Episodes | Brier, model | Brier, prize-only | Skill |
+|---|---|---|---|---|---|
+| Q1 | 1053 to 1075 | 226 | 0.1697 | 0.2006 | +15.4% |
+| Q2 | 1075 to 1100 | 226 | 0.1688 | 0.1987 | +15.1% |
+| Q3 | 1100 to 1138 | 225 | 0.1709 | 0.2037 | +16.1% |
+| Q4 | 1138 to 1277 | 226 | 0.1732 | 0.2200 | +21.2% |
+
+![Brier by agent-strength quartile](reports/figures/strength_stratified.png)
+
+Regressing per-episode Brier on rating, with the **episode** as the unit rather
+than the row, since rows inside a game share one rating and one outcome:
+
+- **the model is flat.** Slope +4.3e-05 ± 6.9e-05 per rating point, *p* = 0.53,
+  *r²* = 0.0004. Over the whole 225-point span the fitted change is smaller than
+  the split-to-split noise from finding 1.
+- **the prize-only baseline degrades.** Slope +1.3e-04, *p* = 0.044. Strong
+  players are harder to read from the prize count alone, which is what you would
+  expect: they trade efficiently and fall behind on prizes without being lost.
+- **so the model's edge grows with strength**, from +15.4% to +21.2%. That
+  gradient is suggestive rather than established: as a per-episode regression it
+  is *p* = 0.11, and most of it comes from Q4 alone.
+
+The useful consequence is directional. Kaggle kept the strong tail, the model's
+advantage is largest in the strong tail, so **+17.4% is more likely an
+over-estimate than an under-estimate** of what this approach would achieve on a
+uniform sample of play. The absolute accuracy, the part that matters for whether
+the forecast is honest, shows no dependence on strength at all.
+
+What this cannot do is see past the filter. Every game here sits between 1053
+and 1279, and half of them inside a 62-point band. Nothing above licenses
+extrapolating to the players Kaggle excluded, who are not in the file.
+
 ---
 
 ## What I would not claim
@@ -193,9 +232,11 @@ prize-differential baseline; the edge arrives as the board resolves.
   decks did, and the Elo table rates agents on a filtered subset of their games
   rather than on all of them. A uniform sample of the population could give
   different numbers, and there is no way to check that from inside this dataset.
-  `data/manifest.csv` carries a per-episode `avg_score`, so the *shape* of the
-  selection is measurable from here even though its effect is not; the pipeline
-  does not yet use it, and that is the most obvious next piece of work.
+  Finding 4 bounds the problem rather than solving it: accuracy does not vary
+  with rating *within* the band that survived the filter, and the model's edge
+  over the baseline is widest at the top of it, so the headline skill figure is
+  more likely flattered than penalised by the selection. The games that were
+  filtered out remain unobserved and unmodelled.
 
 ## What scaling the data settled
 
@@ -306,8 +347,8 @@ make dataset REPLAYS=~/Downloads/archive   # ~9 min for 4,518 episodes
 make train                                 # ~45 min (five splits + ablation + sweep)
 make analyse
 
-make test                                  # 49 tests, ~6s, no network needed
-make verify                                # re-derive all 92 README figures from reports/
+make test                                  # 51 tests, ~6s, no network needed
+make verify                                # re-derive all 125 README figures from reports/
 ```
 
 `make dataset` reduces 21.5 GB of JSON to a single 54 MB table by streaming one
@@ -315,7 +356,7 @@ file at a time across a worker pool and flushing rows into columnar batches as i
 goes; the raw archive never needs to fit in memory and is git-ignored. Peak
 resident size is about 2 GB. Every number and figure in this README is written to
 `reports/` by `make train` and `make analyse`, and committed, so the results are
-checkable without running anything. `make verify` re-derives all 92 figures
+checkable without running anything. `make verify` re-derives all 125 figures
 quoted in this README from those tables and fails on any drift. It runs in CI, so
 a retrain that moves a number cannot silently leave the prose behind. It is what
 caught 85 stale figures when the missing half of the archive arrived.
@@ -335,7 +376,7 @@ src/cabt/
                 calibration variants, unseen-agent check
   plot.py       figures
 scripts/        build_dataset.py · train.py · analyse.py · verify_readme.py
-tests/          49 tests: parser invariants, leakage, perspective symmetry,
+tests/          51 tests: parser invariants, leakage, perspective symmetry,
                 filter causality, metric correctness on known cases
 data/sample/    20 gzipped replays (1.3 MB) so CI runs the real pipeline
 data/manifest.csv  the archive's own episode list, for checking coverage
@@ -360,9 +401,8 @@ the sample is drawn from the stronger tail of play rather than uniformly (see
 "What I would not claim"). And the dataset ships a `manifest.csv` listing every
 included episode with its `avg_score`, committed here as
 [`data/manifest.csv`](data/manifest.csv). Joining the build output against it is
-how the missing-half error at the top of this README was found, and its score
-column is the obvious way to quantify the selection and to test whether forecast
-accuracy varies with agent strength. Neither is done yet.
+how the missing-half error at the top of this README was found, and its
+`avg_score` column is what finding 4 stratifies on.
 
 The replay format itself is undocumented. The structural notes, enum codes and
 gotchas in [`docs/data-schema.md`](docs/data-schema.md) are reverse-engineered
